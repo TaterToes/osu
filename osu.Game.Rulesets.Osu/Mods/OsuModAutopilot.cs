@@ -53,7 +53,7 @@ namespace osu.Game.Rulesets.Osu.Mods
 
         private (Vector2 Position, double Time) lastHitInfo = (default, 0);
         private (double HitWindowStart, double HitWindowEnd) hitWindow = (0, 0);
-        private double currentTimeElapsed = 0;
+        private double timeElapsedBetweenHitObjects = 0;
 
         public void ApplyToDrawableRuleset(DrawableRuleset<OsuHitObject> drawableRuleset)
         {
@@ -65,15 +65,13 @@ namespace osu.Game.Rulesets.Osu.Mods
 
             hasReplayLoaded.BindTo(drawableRuleset.HasReplayLoaded);
 
-            // subscribe to run exactly once after LoadComplete()
             playfield.OnLoadComplete += _ =>
             {
-                // at this point the ruleset, playfield, and cursor are fully initialized
+                // When fully initialized, let's set the last position where the player placed their cursor before the game loaded.
                 Vector2 screenStart = inputManager.CurrentState.Mouse.Position;
                 Vector2 fieldStart = playfield.ScreenSpaceToGamefield(screenStart);
                 double timeStart = playfield.Clock.CurrentTime;
 
-                // store your “initial” hit info
                 lastHitInfo = (fieldStart, timeStart);
             };
 
@@ -109,7 +107,7 @@ namespace osu.Game.Rulesets.Osu.Mods
                 return;
 
             double start = nextObject.HitObject.StartTime;
-            currentTimeElapsed = currentTime - start;
+            timeElapsedBetweenHitObjects = currentTime - start;
 
             // Reduce calculations during replay.
             if (hasReplayLoaded.Value)
@@ -120,7 +118,7 @@ namespace osu.Game.Rulesets.Osu.Mods
                     replaySpinner.HandleUserInput = false;
 
                     // Don't start spinning until position is reached.
-                    if (currentTimeElapsed >= 0)
+                    if (timeElapsedBetweenHitObjects >= 0)
                     {
                         double calculatedSpeed = 1.01 * (spinner.MaximumBonusSpins + spinner.SpinsRequiredForBonus) / spinner.Duration;
                         double rate = calculatedSpeed / playfield.Clock.Rate;
@@ -151,7 +149,7 @@ namespace osu.Game.Rulesets.Osu.Mods
             switch (nextObject)
             {
                 case DrawableSpinner spinnerDrawable:
-                    handleSpinner(spinnerDrawable, currentTime, start);
+                    handleSpinner(spinnerDrawable);
                     return;
 
                 case DrawableSlider sliderDrawable:
@@ -160,10 +158,10 @@ namespace osu.Game.Rulesets.Osu.Mods
 
                     var slider = sliderDrawable.HitObject;
 
-                    if (currentTimeElapsed + mehWindow >= 0 && currentTimeElapsed < slider.Duration)
+                    if (timeElapsedBetweenHitObjects + mehWindow >= 0 && timeElapsedBetweenHitObjects < slider.Duration)
                     {
-                        double prog = Math.Clamp(currentTimeElapsed / slider.Duration, 0, 1);
-                        double spans = (prog * (slider.RepeatCount + 1));
+                        double prog = Math.Clamp(timeElapsedBetweenHitObjects / slider.Duration, 0, 1);
+                        double spans = prog * (slider.RepeatCount + 1);
                         spans = (spans > 1 && spans % 2 > 1) ? 1 - (spans % 1) : spans % 1;
 
                         Vector2 pathPos = sliderDrawable.Position + (slider.Path.PositionAt(spans) * sliderDrawable.Scale);
@@ -203,13 +201,13 @@ namespace osu.Game.Rulesets.Osu.Mods
             return Math.Max(timeLeft, 1);
         }
 
-        private void handleSpinner(DrawableSpinner spinnerDrawable, double currentTime, double start)
+        private void handleSpinner(DrawableSpinner spinnerDrawable)
         {
             var spinner = spinnerDrawable.HitObject;
             spinnerDrawable.HandleUserInput = false;
 
             // Before spinner starts, move to position.
-            if (currentTimeElapsed < 0)
+            if (timeElapsedBetweenHitObjects < 0)
             {
                 Vector2 spinnerTargetPosition = spinner.Position + new Vector2(
                     -(float)Math.Sin(0) * spinner_radius,
@@ -227,7 +225,7 @@ namespace osu.Game.Rulesets.Osu.Mods
 
             spinSpinner(spinnerDrawable, rate);
 
-            double angle = 2 * Math.PI * (currentTimeElapsed * rate);
+            double angle = 2 * Math.PI * (timeElapsedBetweenHitObjects * rate);
             Vector2 circPos = spinner.Position + new Vector2(
                 -(float)Math.Sin(angle) * spinner_radius,
                 -(float)Math.Cos(angle) * spinner_radius);
@@ -237,10 +235,8 @@ namespace osu.Game.Rulesets.Osu.Mods
 
         private void spinSpinner(DrawableSpinner spinnerDrawable, double rate)
         {
-            double elapsedTime = playfield.Clock.ElapsedFrameTime;
-
             // Automatically spin spinner.
-            spinnerDrawable.RotationTracker.AddRotation(float.RadiansToDegrees((float)elapsedTime * (float)rate * MathF.PI * 2.0f));
+            spinnerDrawable.RotationTracker.AddRotation(float.RadiansToDegrees((float)playfield.Clock.ElapsedFrameTime * (float)rate * MathF.PI * 2.0f));
         }
 
         private void moveTowards(Vector2 target, double timeMs)
